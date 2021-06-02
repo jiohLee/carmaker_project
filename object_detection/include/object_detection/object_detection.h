@@ -2,6 +2,7 @@
 #define OBJECT_DETECTION_H
 
 #include <iostream>
+#include <chrono>
 
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud.h>
@@ -23,6 +24,9 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/common/transforms.h>
+#include <pcl/kdtree/kdtree.h>
+#include <pcl/search/search.h>
+#include <pcl/segmentation/extract_clusters.h>
 
 
 //#include <pcl/point_cloud.h>
@@ -69,20 +73,30 @@ private:
     ros::Subscriber subCMNode;
     ros::Publisher pubObjects;
 
-    ros::Publisher pubTmpPcd;
+    ros::Publisher pubPcdRoi;
+    ros::Publisher pubPcdClusters;
 
     // ROS Param
-    Eigen::Matrix4d pcdRTMatrix;
-    Eigen::Matrix4d gtCamRTMatrix;
-    Eigen::Matrix4d rawCamRTMatrix;
-    Eigen::Matrix3d rawCamIntrinsicMatrix;
+    Eigen::Matrix4d RTPointCloud;
+    Eigen::Matrix4d RTGTCam;
+    Eigen::Matrix4d RTRawCam;
+    Eigen::Matrix3d IntrinsicRawCam;
+
+    double clusterTolerance;
+    int minClusterSize;
+    int maxClusterSize;
 
     double segmentThreshold = 0;
     double roiRangeX = 0;
     double roiRangeY = 0;
+    double roiRangeZ = 0;
 
     // Functions
     void setPointCloudRoi(pcl::PointCloud<pcl::PointXYZI>::Ptr src, pcl::PointCloud<pcl::PointXYZI>::Ptr dst);
+    int clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr input, std::vector<pcl::PointCloud<pcl::PointXYZI>> &clusters);
+
+    // Variables
+    std::chrono::time_point<std::chrono::high_resolution_clock> timePrev;
 };
 
 #endif // OBJECT_DETECTION_H

@@ -20,6 +20,11 @@
         <param name="segment_distance_threshold" type="double" value="0.35"/>
         <param name="roi_range_x" type="double" value="40.0"/>
         <param name="roi_range_y" type="double" value="15.0"/>
+        <param name="roi_range_z" type="double" value="4.0"/>
+
+        <param name="cluster_tolerance" type="double" value="0.7" />
+        <param name="min_cluster_size" type="int" value="10" />
+        <param name="max_cluster_size" type="int" value="5000" />
 
         <!-- raw camera sensor parameters -->
         <param name="focal_length_x" type="double" value="1814.86480985"/>
