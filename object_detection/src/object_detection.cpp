@@ -2,13 +2,14 @@
 
 #include <cv_bridge/cv_bridge.h>
 
-std::string TABLE_MESSAGE[6] = {
+std::string TABLE_MESSAGE[7] = {
     "CAR",
     "TRUCK",
     "BICYCLE",
     "PEDESTRIAN",
     "TRAFFIC_SIGN",
-    "TRAFFIC_LIGHT"
+    "TRAFFIC_LIGHT",
+    "UNKNOWN"
 };
 
 ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
@@ -30,8 +31,9 @@ ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     pnh.param<std::string>("object_topic_name", outputTopicName, "/object_detection/objects");
     pubObjects = nh.advertise<object_msgs::Objects>(outputTopicName, 1);
 
-    pubPcdRoi = nh.advertise<sensor_msgs::PointCloud2>("/object_detection/cloud_roi", 1);
+    // visualization
     pubPcdClusters = nh.advertise<sensor_msgs::PointCloud2>("/object_detection/cloud_clusters", 1);
+    pubCenteroids = nh.advertise<visualization_msgs::MarkerArray>("/object_detection/centeroids", 1);
 
     // set pointcloud RT matrix
     RTPointCloud = Eigen::Matrix4d::Identity();
@@ -96,11 +98,6 @@ ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     RotZ << std::cos(rotZ), -std::sin(rotZ), 0, std::sin(rotZ), std::cos(rotZ), 0, 0, 0, 1;
     RTCamGT.block(0, 0, 3, 3) = RotZ * RotY * RotX;
 
-    //    std::cout << "point cloud RT matrix : \n" << RTPointCloud << "\n"
-    //              << "raw camera RT matrix : \n" << RTCamRaw << "\n"
-    //              << "raw camera Intrinsic matrix : \n" << IntrinsicRawCam << "\n"
-    //              << "gt camera RT matrix : \n" << RTCamGT << "\n";
-
     // set other RT matrix
     RTCamRaw2CamGT = RTCamRaw.inverse() * RTCamGT;
     RTCamRaw2PointCloud = RTCamRaw.inverse() * RTPointCloud;
@@ -133,12 +130,6 @@ void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr
     pcl::PointCloud<pcl::PointXYZI>::Ptr pclRoi(new pcl::PointCloud<pcl::PointXYZI>);
     setPointCloudRoi(pclInput, pclRoi);
 
-    //    // visualization Roi of PointCloud
-    //    sensor_msgs::PointCloud2::Ptr pcdOutput(new sensor_msgs::PointCloud2);
-    //    pcl::toROSMsg(*pclRoi, *pcdOutput);
-    //    pcdOutput->header.frame_id = "Fr1A";
-    //    pubPcdRoi.publish(*pcdOutput);
-
     // clustering
     int numCluster = 0;
     std::vector<pcl::PointCloud<pcl::PointXYZI>> pclClusters;
@@ -146,6 +137,34 @@ void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr
     {
         numCluster = clustering(pclRoi, pclClusters);
     }
+
+    // get centeroid of each cluster;
+    objectsCurr.objects.clear();
+    objectsCurr.objects.reserve(pclClusters.size());
+    for (size_t c = 0; c < pclClusters.size(); c++)
+    {
+        object_msgs::Object object;
+        pcl::PointCloud<pcl::PointXYZI>& cluster = pclClusters[c];
+        double centeroid_x = 0;
+        double centeroid_y = 0;
+        double centeroid_z = 0;
+        int cnt = 0;
+
+        for (size_t p = 0; p < cluster.size(); p++)
+        {
+            cnt++;
+            centeroid_x += cluster[p].x;
+            centeroid_y += cluster[p].y;
+            centeroid_z += cluster[p].z;
+        }
+
+        object.centeroid.x = centeroid_x / cnt;
+        object.centeroid.y = centeroid_y / cnt;
+        object.centeroid.z = centeroid_z / cnt;
+
+        objectsCurr.objects.push_back(object);
+    }
+
 
     // merge clusters into single point cloud for visualization
     pcl::PointCloud<pcl::PointXYZI>::Ptr pclClustersMerged(new pcl::PointCloud<pcl::PointXYZI>);
@@ -160,6 +179,8 @@ void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr
     pcdClustersMerged->header.frame_id = "Fr1A";
     pubPcdClusters.publish(*pcdClustersMerged);
 
+    objectsPrev = objectsCurr;
+
     // get elapsed time
     std::chrono::time_point<std::chrono::high_resolution_clock> timeCurr = std::chrono::high_resolution_clock::now();
     double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(timeCurr - timePrev).count();
@@ -171,46 +192,161 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
 {
     cv_bridge::CvImagePtr cvPtr;
     cvPtr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-    camRawImg = cvPtr->image;
+    Mat camRawImg = cvPtr->image;
 
     size_t nCamObj = camGT.cameraSensorObj.size();
-    std::cout << "#Obj : " << nCamObj << "\n";
 
+    boxes.clear();
+    boxes.reserve(nCamObj);
+    boxLabels.clear();
+    boxLabels.reserve(nCamObj);
+    boxID.clear();
+    boxID.reserve(nCamObj);
+
+    // bounding box projection
     for( size_t i = 0; i < nCamObj; i++)
     {
         hellocm_msgs::CameraSensorObj& obj = camGT.cameraSensorObj[i];
-        if(-1 < obj.classType && obj.classType < 4)
-        {
-            std::cout << " #id : " << obj.ObjID << " " << TABLE_MESSAGE[obj.classType] << "\n";
 
+        if(obj.classType < 4)
+        {
             // bounding box
             Eigen::MatrixXd bl(4, 1), tr(4, 1);
             bl << obj.bottom_left_x, obj.bottom_left_y, obj.bottom_left_z, 1;
             tr << obj.top_right_x, obj.top_right_y, obj.top_right_z, 1;
 
-            // to Camera Frame
-            Eigen::MatrixXd blCamRaw(4, 1), trCamRaw(4, 1);
-            blCamRaw = RTCamRaw2CamGT * bl;
-            trCamRaw = RTCamRaw2CamGT * tr;
-
-            // devide scale factor
-            blCamRaw /= blCamRaw(2, 0);
-            trCamRaw /= trCamRaw(2, 0);
-
             // projection to image
-            Eigen::MatrixXd blImg(4, 1), trImg(4, 1);
-            blImg = IntrinsicRawCam * blCamRaw;
-            trImg = IntrinsicRawCam * trCamRaw;
+            Eigen::MatrixXd blImg(3, 1), trImg(3, 1);
+            blImg = imageProjection(bl, RTCamRaw2CamGT);
+            trImg = imageProjection(tr, RTCamRaw2CamGT);
 
-            // top left, bottom right
-            Point tl(blImg(0, 0), trImg(1, 0));
-            Point br(trImg(0, 0), blImg(1, 0));
 
-            // draw
-            rectangle(camRawImg, Rect(tl, br), Scalar(0, 255, 0), 3);
+            Rect box(Point(blImg(0, 0), trImg(1, 0)), Point(trImg(0, 0), blImg(1, 0)));
+            if (obj.classType == static_cast<int>(PEDESTRIAN))
+            {
+                box.x -= 5;
+                box.width += 10;
+            }
+            boxes.push_back(box);
+            boxLabels.push_back(obj.classType);
+            boxID.push_back(obj.ObjID);
+
+//            // draw
+//            double fontScale = 0.7;
+//            int fontFace = CV_FONT_HERSHEY_PLAIN;
+//            int thickness = 1;
+//            int baseLine = 0;
+
+//            std::string message = std::to_string(i) + " " + TABLE_MESSAGE[obj.classType];
+//            Size backgroundSize = getTextSize(message, fontFace, fontScale, thickness, &baseLine);
+//            Rect background(box.x, box.y - backgroundSize.height, backgroundSize.width, backgroundSize.height);
+
+//            rectangle(camRawImg, background, Scalar(0, 0, 255), -1);
+//            rectangle(camRawImg, box, Scalar(0, 0, 255), 2);
+//            putText(camRawImg, message, box.tl(), fontFace, fontScale, Scalar(0,0,0), 1);
+        }
+    }
+
+    //draw bounding boxes
+    for (size_t i = 0; i < boxes.size(); i++)
+    {
+        const Rect& box = boxes[i];
+        double fontScale = 0.7;
+        int fontFace = CV_FONT_HERSHEY_PLAIN;
+        int thickness = 1;
+        int baseLine = 0;
+
+        std::string message = std::to_string(i) + " " + TABLE_MESSAGE[boxLabels[i]];
+        Size backgroundSize = getTextSize(message, fontFace, fontScale, thickness, &baseLine);
+        Rect background(box.x, box.y - backgroundSize.height, backgroundSize.width, backgroundSize.height);
+
+        rectangle(camRawImg, background, Scalar(0, 0, 255), -1);
+        rectangle(camRawImg, box, Scalar(0, 0, 255), 2);
+        putText(camRawImg, message, box.tl(), fontFace, fontScale, Scalar(0,0,0), 1);
+    }
+
+    // draw cluster centeroids
+    for (size_t c = 0; c < objectsPrev.objects.size(); c++)
+    {
+        object_msgs::Object &obj = objectsPrev.objects[c];
+
+        Eigen::MatrixXd centeroid(4, 1);
+        centeroid << obj.centeroid.x, obj.centeroid.y, obj.centeroid.z, 1;
+
+        // projection
+        Eigen::MatrixXd centeroidImg(3, 1);
+        centeroidImg = imageProjection(centeroid, RTCamRaw.inverse());
+
+        // draw
+        if(centeroid(0,0) > 0)
+        {
+            circle(camRawImg, Point(centeroidImg(0, 0), centeroidImg(1, 0)), 3, Scalar(0, 255, 0), -1);
+        }
+    }
+
+    // labeling
+    for (size_t i = 0; i < objectsCurr.objects.size(); i++)
+    {
+        object_msgs::Object& obj = objectsCurr.objects[i];
+
+        Eigen::MatrixXd centeroid(4, 1);
+        centeroid << obj.centeroid.x, obj.centeroid.y, obj.centeroid.z, 1;
+
+        // projection
+        Eigen::MatrixXd centeroidImg(3, 1);
+        centeroidImg = imageProjection(centeroid, RTCamRaw.inverse());
+        Point center(centeroidImg(0, 0), centeroidImg(1, 0));
+
+        bool check = false;
+        for (size_t b = 0; b < boxes.size(); b++)
+        {
+            Rect & box = boxes[b];
+            if(box.contains(center))
+            {
+                obj.labels = boxLabels[b];
+                obj.id = boxID[b];
+                check = true;
+            }
         }
 
+        // no box contian centeroid than unknown
+        if(!check)
+        {
+            obj.id = -1;
+            obj.labels = 6;
+        }
     }
+
+    // visualization labels
+    visualization_msgs::MarkerArray markerCenteroids;
+
+    // delete all markers
+    visualization_msgs::Marker markerD;
+    markerD.header.frame_id = "Fr1A";
+    markerD.action = visualization_msgs::Marker::DELETEALL;
+    markerCenteroids.markers.push_back(markerD);
+    pubCenteroids.publish(markerCenteroids);
+
+    for (size_t i = 0; i < objectsCurr.objects.size(); i++)
+    {
+        object_msgs::Object& obj = objectsCurr.objects[i];
+
+        visualization_msgs::Marker marker;
+        marker.header.frame_id = "Fr1A";
+        marker.text = TABLE_MESSAGE[obj.labels];
+        marker.color.a = 1.0;
+        marker.scale.z = 1.0;
+        marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        marker.id = i;
+        marker.action = visualization_msgs::Marker::ADD;
+        marker.pose.orientation.w = 1.0;
+        marker.pose.position.x = obj.centeroid.x;
+        marker.pose.position.y = obj.centeroid.y;
+        marker.pose.position.z = obj.centeroid.z + 2;
+
+        markerCenteroids.markers.push_back(marker);
+    }
+    pubCenteroids.publish(markerCenteroids);
 
     imshow("raw image", camRawImg);
     waitKey(1);
@@ -297,3 +433,12 @@ int ObjectDetection::clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr input
     }
     return id;
 }
+
+Eigen::MatrixXd ObjectDetection::imageProjection(Eigen::MatrixXd from, Eigen::MatrixXd RT)
+{
+    Eigen::MatrixXd targetCoordinate(4, 1);
+    targetCoordinate = RT * from;
+    targetCoordinate /= targetCoordinate(2, 0);
+    return IntrinsicRawCam * targetCoordinate.block(0, 0, 3, 1);
+}
+

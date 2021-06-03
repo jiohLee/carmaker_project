@@ -13,6 +13,7 @@
 #include <hellocm_msgs/CM2Ext.h>
 #include <hellocm_msgs/CameraSensor.h>
 #include <hellocm_msgs/CameraSensorObj.h>
+#include <visualization_msgs/MarkerArray.h>
 
 #include <object_msgs/Objects.h>
 
@@ -61,7 +62,8 @@ enum OBJECT_TYPE
     BICYCLE,
     PEDESTRIAN,
     TRAFFICSIGN,
-    TRAFFICLIGHT
+    TRAFFICLIGHT,
+    UNKNOWN
 };
 
 using namespace cv;
@@ -87,11 +89,12 @@ private:
     ros::Subscriber subCMNode;
     ros::Publisher pubObjects;
 
-    ros::Publisher pubPcdRoi;
     ros::Publisher pubPcdClusters;
+    ros::Publisher pubCenteroids;
 
     hellocm_msgs::CameraSensor camGT;
-    Mat camRawImg;
+    object_msgs::Objects objectsPrev;
+    object_msgs::Objects objectsCurr;
 
     // ROS Param
     Eigen::Matrix4d RTPointCloud;
@@ -114,9 +117,14 @@ private:
     // Functions
     void setPointCloudRoi(pcl::PointCloud<pcl::PointXYZI>::Ptr src, pcl::PointCloud<pcl::PointXYZI>::Ptr dst);
     int clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr input, std::vector<pcl::PointCloud<pcl::PointXYZI>> &clusters);
+    Eigen::MatrixXd imageProjection(Eigen::MatrixXd from, Eigen::MatrixXd RT);
 
     // Variables
     std::chrono::time_point<std::chrono::high_resolution_clock> timePrev;
+
+    std::vector<Rect> boxes;
+    std::vector<int> boxLabels;
+    std::vector<int> boxID;
 };
 
 #endif // OBJECT_DETECTION_H
