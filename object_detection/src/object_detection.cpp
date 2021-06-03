@@ -1,6 +1,15 @@
 #include "object_detection/object_detection.h"
 
-#include <string>
+#include <cv_bridge/cv_bridge.h>
+
+std::string TABLE_MESSAGE[6] = {
+    "CAR",
+    "TRUCK",
+    "BICYCLE",
+    "PEDESTRIAN",
+    "TRAFFIC_SIGN",
+    "TRAFFIC_LIGHT"
+};
 
 ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     :nh(nh)
@@ -52,10 +61,10 @@ ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     pnh.param<double>("focal_center_y", IntrinsicRawCam(1, 2), 240.0);
 
     // set raw camera RT matrix
-    RTRawCam = Eigen::Matrix4d::Identity();
-    pnh.param<double>("camera_rsi_position_m_x", RTRawCam(0, 3), 2.4);
-    pnh.param<double>("camera_rsi_position_m_y", RTRawCam(1, 3), 0.0);
-    pnh.param<double>("camera_rsi_position_m_z", RTRawCam(2, 3), 2.2);
+    RTCamRaw = Eigen::Matrix4d::Identity();
+    pnh.param<double>("camera_rsi_position_m_x", RTCamRaw(0, 3), 2.4);
+    pnh.param<double>("camera_rsi_position_m_y", RTCamRaw(1, 3), 0.0);
+    pnh.param<double>("camera_rsi_position_m_z", RTCamRaw(2, 3), 2.2);
 
     pnh.param<double>("camera_rsi_rotation_deg_x", rotX, 90.0);
     pnh.param<double>("camera_rsi_rotation_deg_y", rotY, -90.0);
@@ -67,13 +76,13 @@ ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     RotX << 1, 0, 0, 0, std::cos(rotX), -std::sin(rotX), 0, std::sin(rotX), std::cos(rotX);
     RotY << std::cos(rotY), 0, std::sin(rotY), 0, 1, 0, -std::sin(rotY), 0, std::cos(rotY);
     RotZ << std::cos(rotZ), -std::sin(rotZ), 0, std::sin(rotZ), std::cos(rotZ), 0, 0, 0, 1;
-    RTRawCam.block(0, 0, 3, 3) = RotZ * RotY * RotX;
+    RTCamRaw.block(0, 0, 3, 3) = RotZ * RotY * RotX;
 
     // set GT camera RT matrix
-    RTGTCam = Eigen::Matrix4d::Identity();
-    pnh.param<double>("camera_gt_position_m_x", RTGTCam(0, 3), 2.5);
-    pnh.param<double>("camera_gt_position_m_y", RTGTCam(1, 3), 0.0);
-    pnh.param<double>("camera_gt_position_m_z", RTGTCam(2, 3), 1.3);
+    RTCamGT = Eigen::Matrix4d::Identity();
+    pnh.param<double>("camera_gt_position_m_x", RTCamGT(0, 3), 2.5);
+    pnh.param<double>("camera_gt_position_m_y", RTCamGT(1, 3), 0.0);
+    pnh.param<double>("camera_gt_position_m_z", RTCamGT(2, 3), 1.3);
 
     pnh.param<double>("camera_gt_rotation_deg_x", rotX, 0.0);
     pnh.param<double>("camera_gt_rotation_deg_y", rotY, 0.0);
@@ -85,12 +94,16 @@ ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     RotX << 1, 0, 0, 0, std::cos(rotX), -std::sin(rotX), 0, std::sin(rotX), std::cos(rotX);
     RotY << std::cos(rotY), 0, std::sin(rotY), 0, 1, 0, -std::sin(rotY), 0, std::cos(rotY);
     RotZ << std::cos(rotZ), -std::sin(rotZ), 0, std::sin(rotZ), std::cos(rotZ), 0, 0, 0, 1;
-    RTGTCam.block(0, 0, 3, 3) = RotZ * RotY * RotX;
+    RTCamGT.block(0, 0, 3, 3) = RotZ * RotY * RotX;
 
     //    std::cout << "point cloud RT matrix : \n" << RTPointCloud << "\n"
-    //              << "raw camera RT matrix : \n" << RTRawCam << "\n"
+    //              << "raw camera RT matrix : \n" << RTCamRaw << "\n"
     //              << "raw camera Intrinsic matrix : \n" << IntrinsicRawCam << "\n"
-    //              << "gt camera RT matrix : \n" << RTGTCam << "\n";
+    //              << "gt camera RT matrix : \n" << RTCamGT << "\n";
+
+    // set other RT matrix
+    RTCamRaw2CamGT = RTCamRaw.inverse() * RTCamGT;
+    RTCamRaw2PointCloud = RTCamRaw.inverse() * RTPointCloud;
 
     // set Lidar parameters
     pnh.param<double>("segment_distance_threshold", segmentThreshold, 0.3);
@@ -120,11 +133,11 @@ void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr
     pcl::PointCloud<pcl::PointXYZI>::Ptr pclRoi(new pcl::PointCloud<pcl::PointXYZI>);
     setPointCloudRoi(pclInput, pclRoi);
 
-//    // visualization Roi of PointCloud
-//    sensor_msgs::PointCloud2::Ptr pcdOutput(new sensor_msgs::PointCloud2);
-//    pcl::toROSMsg(*pclRoi, *pcdOutput);
-//    pcdOutput->header.frame_id = "Fr1A";
-//    pubPcdRoi.publish(*pcdOutput);
+    //    // visualization Roi of PointCloud
+    //    sensor_msgs::PointCloud2::Ptr pcdOutput(new sensor_msgs::PointCloud2);
+    //    pcl::toROSMsg(*pclRoi, *pcdOutput);
+    //    pcdOutput->header.frame_id = "Fr1A";
+    //    pubPcdRoi.publish(*pcdOutput);
 
     // clustering
     int numCluster = 0;
@@ -156,12 +169,56 @@ void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr
 
 void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage::ConstPtr &msg)
 {
+    cv_bridge::CvImagePtr cvPtr;
+    cvPtr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+    camRawImg = cvPtr->image;
 
+    size_t nCamObj = camGT.cameraSensorObj.size();
+    std::cout << "#Obj : " << nCamObj << "\n";
+
+    for( size_t i = 0; i < nCamObj; i++)
+    {
+        hellocm_msgs::CameraSensorObj& obj = camGT.cameraSensorObj[i];
+        if(-1 < obj.classType && obj.classType < 4)
+        {
+            std::cout << " #id : " << obj.ObjID << " " << TABLE_MESSAGE[obj.classType] << "\n";
+
+            // bounding box
+            Eigen::MatrixXd bl(4, 1), tr(4, 1);
+            bl << obj.bottom_left_x, obj.bottom_left_y, obj.bottom_left_z, 1;
+            tr << obj.top_right_x, obj.top_right_y, obj.top_right_z, 1;
+
+            // to Camera Frame
+            Eigen::MatrixXd blCamRaw(4, 1), trCamRaw(4, 1);
+            blCamRaw = RTCamRaw2CamGT * bl;
+            trCamRaw = RTCamRaw2CamGT * tr;
+
+            // devide scale factor
+            blCamRaw /= blCamRaw(2, 0);
+            trCamRaw /= trCamRaw(2, 0);
+
+            // projection to image
+            Eigen::MatrixXd blImg(4, 1), trImg(4, 1);
+            blImg = IntrinsicRawCam * blCamRaw;
+            trImg = IntrinsicRawCam * trCamRaw;
+
+            // top left, bottom right
+            Point tl(blImg(0, 0), trImg(1, 0));
+            Point br(trImg(0, 0), blImg(1, 0));
+
+            // draw
+            rectangle(camRawImg, Rect(tl, br), Scalar(0, 255, 0), 3);
+        }
+
+    }
+
+    imshow("raw image", camRawImg);
+    waitKey(1);
 }
 
 void ObjectDetection::CMNodeCallback(const hellocm_msgs::CM2Ext::ConstPtr &msg)
 {
-
+    camGT = msg->camearaSensor;
 }
 
 void ObjectDetection::setPointCloudRoi(pcl::PointCloud<pcl::PointXYZI>::Ptr src, pcl::PointCloud<pcl::PointXYZI>::Ptr dst)

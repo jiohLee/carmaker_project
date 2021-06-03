@@ -27,8 +27,8 @@
         <param name="max_cluster_size" type="int" value="5000" />
 
         <!-- raw camera sensor parameters -->
-        <param name="focal_length_x" type="double" value="1814.86480985"/>
-        <param name="focal_length_y" type="double" value="1814.86480985"/>
+        <param name="focal_length_x" type="double" value="381.3611496"/>
+        <param name="focal_length_y" type="double" value="381.3611496"/>
         <param name="focal_center_x" type="double" value="320"/>
         <param name="focal_center_y" type="double" value="240"/>
 
@@ -36,9 +36,9 @@
         <param name="camera_rsi_position_m_y" type="double" value="0.0"/>
         <param name="camera_rsi_position_m_z" type="double" value="1.5"/>
 
-        <param name="camera_rsi_rotation_deg_x" type="double" value="90.0"/>
-        <param name="camera_rsi_rotation_deg_y" type="double" value="-90.0"/>
-        <param name="camera_rsi_rotation_deg_z" type="double" value="0.0"/>
+        <param name="camera_rsi_rotation_deg_x" type="double" value="-90.0"/>
+        <param name="camera_rsi_rotation_deg_y" type="double" value="0.0"/>
+        <param name="camera_rsi_rotation_deg_z" type="double" value="-90.0"/>
 
         <!-- image processing output parameters (camera GT) -->
         <param name="camera_gt_position_m_x" type="double" value="2.5"/>

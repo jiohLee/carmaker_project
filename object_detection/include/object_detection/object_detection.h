@@ -2,6 +2,7 @@
 #define OBJECT_DETECTION_H
 
 #include <iostream>
+#include <string>
 #include <chrono>
 
 #include <ros/ros.h>
@@ -10,6 +11,9 @@
 #include <sensor_msgs/point_cloud_conversion.h>
 #include <sensor_msgs/CompressedImage.h>
 #include <hellocm_msgs/CM2Ext.h>
+#include <hellocm_msgs/CameraSensor.h>
+#include <hellocm_msgs/CameraSensorObj.h>
+
 #include <object_msgs/Objects.h>
 
 #include <opencv2/opencv.hpp>
@@ -27,7 +31,6 @@
 #include <pcl/kdtree/kdtree.h>
 #include <pcl/search/search.h>
 #include <pcl/segmentation/extract_clusters.h>
-
 
 //#include <pcl/point_cloud.h>
 //#include <pcl/point_types.h>
@@ -49,6 +52,17 @@ inline double rad2deg(double rad)
 {
     return rad * 180 / M_PI;
 }
+
+// enum
+enum OBJECT_TYPE
+{
+    CAR = 0,
+    TRUCK,
+    BICYCLE,
+    PEDESTRIAN,
+    TRAFFICSIGN,
+    TRAFFICLIGHT
+};
 
 using namespace cv;
 
@@ -76,11 +90,17 @@ private:
     ros::Publisher pubPcdRoi;
     ros::Publisher pubPcdClusters;
 
+    hellocm_msgs::CameraSensor camGT;
+    Mat camRawImg;
+
     // ROS Param
     Eigen::Matrix4d RTPointCloud;
-    Eigen::Matrix4d RTGTCam;
-    Eigen::Matrix4d RTRawCam;
+    Eigen::Matrix4d RTCamGT;
+    Eigen::Matrix4d RTCamRaw;
     Eigen::Matrix3d IntrinsicRawCam;
+
+    Eigen::Matrix4d RTCamRaw2CamGT;
+    Eigen::Matrix4d RTCamRaw2PointCloud;
 
     double clusterTolerance;
     int minClusterSize;
