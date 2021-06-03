@@ -19,7 +19,7 @@
 
         <param name="segment_distance_threshold" type="double" value="0.5"/>
         <param name="roi_range_x" type="double" value="30.0"/>
-        <param name="roi_range_y" type="double" value="10.0"/>
+        <param name="roi_range_y" type="double" value="13.0"/>
         <param name="roi_range_z" type="double" value="4.0"/>
 
         <param name="cluster_tolerance" type="double" value="1.3" />
