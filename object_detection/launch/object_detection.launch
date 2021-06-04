@@ -17,8 +17,8 @@
         <param name="lidar_rsi_rotation_deg_y" type="double" value="0.0"/>
         <param name="lidar_rsi_rotation_deg_z" type="double" value="0.0"/>
 
-        <param name="segment_distance_threshold" type="double" value="0.5"/>
-        <param name="roi_range_x" type="double" value="30.0"/>
+        <param name="segment_distance_threshold" type="double" value="0.45"/>
+        <param name="roi_range_x" type="double" value="35.0"/>
         <param name="roi_range_y" type="double" value="13.0"/>
         <param name="roi_range_z" type="double" value="4.0"/>
 

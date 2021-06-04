@@ -112,7 +112,8 @@ ObjectDetection::ObjectDetection(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     pnh.param<int>("min_cluster_size", minClusterSize, 4);
     pnh.param<int>("max_cluster_size", maxClusterSize, 100);
 
-    timePrev = std::chrono::high_resolution_clock::now();
+    timePrevPcd = std::chrono::high_resolution_clock::now();
+    timePrevImg = std::chrono::high_resolution_clock::now();
 }
 
 void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr &msg)
@@ -165,6 +166,7 @@ void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr
         objectsCurr.objects.push_back(object);
     }
 
+    centeroidUpdated = true;
 
     // merge clusters into single point cloud for visualization
     pcl::PointCloud<pcl::PointXYZI>::Ptr pclClustersMerged(new pcl::PointCloud<pcl::PointXYZI>);
@@ -179,13 +181,11 @@ void ObjectDetection::pointCloudCallback(const sensor_msgs::PointCloud::ConstPtr
     pcdClustersMerged->header.frame_id = "Fr1A";
     pubPcdClusters.publish(*pcdClustersMerged);
 
-    objectsPrev = objectsCurr;
-
     // get elapsed time
     std::chrono::time_point<std::chrono::high_resolution_clock> timeCurr = std::chrono::high_resolution_clock::now();
-    double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(timeCurr - timePrev).count();
-    timePrev = timeCurr;
-    ROS_INFO("elpased %lf[ms]", elapsed / 1000);
+    double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(timeCurr - timePrevPcd).count();
+    timePrevPcd = timeCurr;
+    ROS_INFO("elpased pcd : %lf[ms]", elapsed / 1000);
 }
 
 void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage::ConstPtr &msg)
@@ -206,7 +206,7 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
     // bounding box projection
     for( size_t i = 0; i < nCamObj; i++)
     {
-        hellocm_msgs::CameraSensorObj& obj = camGT.cameraSensorObj[i];
+        const hellocm_msgs::CameraSensorObj& obj = camGT.cameraSensorObj[i];
 
         if(obj.classType < 4)
         {
@@ -217,8 +217,8 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
 
             // projection to image
             Eigen::MatrixXd blImg(3, 1), trImg(3, 1);
-            blImg = imageProjection(bl, RTCamRaw2CamGT);
-            trImg = imageProjection(tr, RTCamRaw2CamGT);
+            imageProjection(blImg, RTCamRaw2CamGT, bl);
+            imageProjection(trImg, RTCamRaw2CamGT, tr);
 
 
             Rect box(Point(blImg(0, 0), trImg(1, 0)), Point(trImg(0, 0), blImg(1, 0)));
@@ -231,19 +231,6 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
             boxLabels.push_back(obj.classType);
             boxID.push_back(obj.ObjID);
 
-//            // draw
-//            double fontScale = 0.7;
-//            int fontFace = CV_FONT_HERSHEY_PLAIN;
-//            int thickness = 1;
-//            int baseLine = 0;
-
-//            std::string message = std::to_string(i) + " " + TABLE_MESSAGE[obj.classType];
-//            Size backgroundSize = getTextSize(message, fontFace, fontScale, thickness, &baseLine);
-//            Rect background(box.x, box.y - backgroundSize.height, backgroundSize.width, backgroundSize.height);
-
-//            rectangle(camRawImg, background, Scalar(0, 0, 255), -1);
-//            rectangle(camRawImg, box, Scalar(0, 0, 255), 2);
-//            putText(camRawImg, message, box.tl(), fontFace, fontScale, Scalar(0,0,0), 1);
         }
     }
 
@@ -268,14 +255,14 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
     // draw cluster centeroids
     for (size_t c = 0; c < objectsPrev.objects.size(); c++)
     {
-        object_msgs::Object &obj = objectsPrev.objects[c];
+        const object_msgs::Object &obj = objectsPrev.objects[c];
 
         Eigen::MatrixXd centeroid(4, 1);
         centeroid << obj.centeroid.x, obj.centeroid.y, obj.centeroid.z, 1;
 
         // projection
         Eigen::MatrixXd centeroidImg(3, 1);
-        centeroidImg = imageProjection(centeroid, RTCamRaw.inverse());
+        imageProjection(centeroidImg, RTCamRaw.inverse(), centeroid);
 
         // draw
         if(centeroid(0,0) > 0)
@@ -294,7 +281,8 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
 
         // projection
         Eigen::MatrixXd centeroidImg(3, 1);
-        centeroidImg = imageProjection(centeroid, RTCamRaw.inverse());
+        imageProjection(centeroidImg, RTCamRaw.inverse(), centeroid);
+
         Point center(centeroidImg(0, 0), centeroidImg(1, 0));
 
         bool check = false;
@@ -317,6 +305,37 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
         }
     }
 
+    // get elapsed time
+    std::chrono::time_point<std::chrono::high_resolution_clock> timeCurr = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(timeCurr - timePrevImg).count();
+    timePrevImg = timeCurr;
+    ROS_INFO("elpased img : %lf[ms]", elapsed / 1000);
+
+    if(centeroidUpdated)
+    {
+        // calculate relative velocity
+        for (size_t i = 0; i < objectsCurr.objects.size(); i++)
+        {
+            object_msgs::Object & objCurr = objectsCurr.objects[i];
+
+            for (size_t j = 0; j < objectsPrev.objects.size(); j++)
+            {
+                const object_msgs::Object & objPrev = objectsPrev.objects[i];
+
+                if(objPrev.id == objCurr.id && objCurr.labels < 6)
+                {
+                    objCurr.velocity.x = ((objCurr.centeroid.x - objPrev.centeroid.x) / (elapsed / 10000000.0)) / 3.6; // m/s -> km/h
+                    objCurr.velocity.y = ((objCurr.centeroid.y - objPrev.centeroid.y) / (elapsed / 10000000.0)) / 3.6; // m/s -> km/h
+                }
+            }
+        }
+
+        objectsPrev = objectsCurr;
+        centeroidUpdated = false;
+
+        pubObjects.publish(objectsCurr);
+    }
+
     // visualization labels
     visualization_msgs::MarkerArray markerCenteroids;
 
@@ -333,7 +352,7 @@ void ObjectDetection::compressedImageCallback(const sensor_msgs::CompressedImage
 
         visualization_msgs::Marker marker;
         marker.header.frame_id = "Fr1A";
-        marker.text = TABLE_MESSAGE[obj.labels];
+        marker.text = TABLE_MESSAGE[obj.labels] + " " + std::to_string(obj.velocity.x) + " " + std::to_string(obj.velocity.y);
         marker.color.a = 1.0;
         marker.scale.z = 1.0;
         marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
@@ -375,7 +394,7 @@ void ObjectDetection::setPointCloudRoi(pcl::PointCloud<pcl::PointXYZI>::Ptr src,
     pass.filter(*dst);
 
     pass.setFilterFieldName("x");
-    pass.setFilterLimits(-roiRangeX, roiRangeX);
+    pass.setFilterLimits(-roiRangeX, roiRangeX + RTPointCloud(0, 3));
     pass.setFilterLimitsNegative(false);
 
     pass.setInputCloud(dst);
@@ -434,11 +453,19 @@ int ObjectDetection::clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr input
     return id;
 }
 
-Eigen::MatrixXd ObjectDetection::imageProjection(Eigen::MatrixXd from, Eigen::MatrixXd RT)
+void ObjectDetection::imageProjection(Eigen::MatrixXd &to, const Eigen::MatrixXd &RT, const Eigen::MatrixXd &from)
 {
     Eigen::MatrixXd targetCoordinate(4, 1);
     targetCoordinate = RT * from;
     targetCoordinate /= targetCoordinate(2, 0);
-    return IntrinsicRawCam * targetCoordinate.block(0, 0, 3, 1);
+    to = IntrinsicRawCam * targetCoordinate.block(0, 0, 3, 1);
 }
+
+//Eigen::MatrixXd ObjectDetection::imageProjection(const Eigen::MatrixXd& from, const Eigen::MatrixXd& RT)
+//{
+//    Eigen::MatrixXd targetCoordinate(4, 1);
+//    targetCoordinate = RT * from;
+//    targetCoordinate /= targetCoordinate(2, 0);
+//    return IntrinsicRawCam * targetCoordinate.block(0, 0, 3, 1);
+//}
 

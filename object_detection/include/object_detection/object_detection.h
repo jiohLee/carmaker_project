@@ -64,8 +64,8 @@ enum OBJECT_TYPE
     TRAFFICSIGN,
     TRAFFICLIGHT,
     UNKNOWN
-};
 
+};
 using namespace cv;
 
 class ObjectDetection
@@ -117,10 +117,12 @@ private:
     // Functions
     void setPointCloudRoi(pcl::PointCloud<pcl::PointXYZI>::Ptr src, pcl::PointCloud<pcl::PointXYZI>::Ptr dst);
     int clustering(const pcl::PointCloud<pcl::PointXYZI>::Ptr input, std::vector<pcl::PointCloud<pcl::PointXYZI>> &clusters);
-    Eigen::MatrixXd imageProjection(Eigen::MatrixXd from, Eigen::MatrixXd RT);
+    void imageProjection(Eigen::MatrixXd& to, const Eigen::MatrixXd& RT, const Eigen::MatrixXd& from);
 
     // Variables
-    std::chrono::time_point<std::chrono::high_resolution_clock> timePrev;
+    bool centeroidUpdated = false;
+    std::chrono::time_point<std::chrono::high_resolution_clock> timePrevPcd;
+    std::chrono::time_point<std::chrono::high_resolution_clock> timePrevImg;
 
     std::vector<Rect> boxes;
     std::vector<int> boxLabels;

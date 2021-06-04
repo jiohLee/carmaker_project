@@ -59,45 +59,30 @@ void ControlCallbackwithSteeringwheel(const hellocm_msgs::CM2Ext::ConstPtr& msg)
     float nCamObj = msg->camearaSensor.nObj;
     std::cout << "#Obj : " << nCamObj << " " << " cnt : " << cnt++ << "\n";
 
-    for( size_t i = 0; i < nCamObj; i++)
-    {
-        std::cout << "#type : " << msg->camearaSensor.cameraSensorObj[i].classType
-                  << " #id" << msg->camearaSensor.cameraSensorObj[i].ObjID << "\n";
+    hellocm_msgs::Ext2CM exmsg;
+    exmsg.VC_SwitchOn = 1;
+    exmsg.GearNo = 1;
+    exmsg.Ax = Long_p_control;
+    exmsg.SteeringWheel = Lat_p_control;
+    ROS_INFO("vel, steer | %f, %f", Long_p_control, Lat_p_control);
+    pub.publish(exmsg);
+}
 
-        std::cout << "MBR bottom left x, y, z | "
-                  << msg->camearaSensor.cameraSensorObj[i].bottom_left_x << ", "
-                  << msg->camearaSensor.cameraSensorObj[i].bottom_left_y << ", "
-                  << msg->camearaSensor.cameraSensorObj[i].bottom_left_z << "\n"
-                  << "MBR top right x, y, z | "
-                  << msg->camearaSensor.cameraSensorObj[i].top_right_x << ", "
-                  << msg->camearaSensor.cameraSensorObj[i].top_right_y << ", "
-                  << msg->camearaSensor.cameraSensorObj[i].top_right_z << "\n";
+int main(int argc, char **argv)
+{
 
-    }
+    ros::init(argc, argv, "user_pkg");
 
-        hellocm_msgs::Ext2CM exmsg;
-        exmsg.VC_SwitchOn = 1;
-        exmsg.GearNo = 1;
-        exmsg.Ax = Long_p_control;
-        exmsg.SteeringWheel = Lat_p_control;
-        pub.publish(exmsg);
-    }
+    ros::NodeHandle nh;
+    ros::NodeHandle pnh;
 
-    int main(int argc, char **argv)
-    {
+    ros::Subscriber sub = nh.subscribe("/hellocm/cm2ext", 1, ControlCallbackwithSteeringwheel);
 
-        ros::init(argc, argv, "user_pkg");
+    pub = nh.advertise<hellocm_msgs::Ext2CM>("/hellocm/ext2cm",1);
 
-        ros::NodeHandle nh;
-        ros::NodeHandle pnh;
+    pnh.param<double>("target_velocity_kph", targetVelocityKPH, 20.0);
 
-        ros::Subscriber sub = nh.subscribe("/hellocm/cm2ext", 1, ControlCallbackwithSteeringwheel);
+    ros::spin();
 
-        pub = nh.advertise<hellocm_msgs::Ext2CM>("/hellocm/ext2cm",1);
-
-        pnh.param<double>("target_velocity_kph", targetVelocityKPH, 20.0);
-
-        ros::spin();
-
-        return 0;
-    }
+    return 0;
+}
