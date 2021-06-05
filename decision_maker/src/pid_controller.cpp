@@ -18,6 +18,7 @@ float PIDController::getControlInput(float target, float current, float dt)
     }
 
     derivative = (error - errorPrev) / dt;
+
     errorPrev = error;
 
     return Kp_ * error + Ki_ * integral + Kd_ * derivative;

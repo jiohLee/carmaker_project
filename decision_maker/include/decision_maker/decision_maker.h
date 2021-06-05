@@ -67,8 +67,8 @@ private:
 
     std::chrono::time_point<std::chrono::high_resolution_clock> timePrevCM2Ext;
 
-    bool ACCon = false;
-    int ACCID = 0;
+    double elapsedTime = 0;
+    bool changeing = false;
 };
 
 #endif // DECISION_MAKER_H

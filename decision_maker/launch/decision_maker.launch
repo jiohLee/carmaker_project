@@ -10,13 +10,13 @@
         <!-- PID gains -->
         <param name="latitude_steer_kp" type="double" value="6.0"/>
         <param name="latitude_steer_ki" type="double" value="0.0"/>
-        <param name="latitude_steer_kd" type="double" value="0.01"/>
+        <param name="latitude_steer_kd" type="double" value="0.0"/>
 
         <param name="longitude_velocity_kp" type="double" value="0.5"/>
         <param name="longitude_velocity_ki" type="double" value="0.0"/>
         <param name="longitude_velocity_kd" type="double" value="0.0"/>
 
-        <param name="longitude_distance_kp" type="double" value="0.12"/>
+        <param name="longitude_distance_kp" type="double" value="0.13"/>
         <param name="longitude_distance_ki" type="double" value="0"/>
         <param name="longitude_distance_kd" type="double" value="0"/>
 

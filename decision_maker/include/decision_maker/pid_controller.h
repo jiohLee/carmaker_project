@@ -22,12 +22,13 @@ private:
     float Ki_ = 0;
     float Kd_ = 0;
 
-    float integral = 0;
-    float derivative = 0;
     float error = 0;
     float errorPrev = 0;
 
     std::deque<float> errorQ;
+
+    float derivative;
+    float integral;
 };
 
 #endif // PIDCONTROLLER_H
